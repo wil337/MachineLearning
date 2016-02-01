@@ -1,0 +1,138 @@
+---
+title: "Dumbbell classification"
+output: html_document
+---
+## Summary
+This analysis looks at  movement device data, and looks at predicting the type of execution of dumbbell exercises into different classes.  A represents doing the exercise correctly, whereas other classes B, C, D, E represent other different incorrect ways of doing the dumbbell exercise.
+
+## Machine Learning
+
+In order to create a prediction algothirm, we needed to extract the data and do some data cleaning to remove N/A variables.
+
+```{r,eval=FALSE}
+library(YaleToolkit)
+library(caret)
+library(dplyr)
+
+#get data
+train<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",stringsAsFactors = FALSE,na.strings=c("NA","#DIV/0!"))
+test<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+train$classe <- factor(train$classe)
+
+#get rid of the first 7 columns
+train2<-(train[,-c(1:7)])
+
+#get rid of columns with NAs
+noMissing<-whatis(train2)$missing==0
+train3<-train2[,noMissing]
+
+```
+
+Next, I needed to partition the data and used correlation to sort out the top 10 features to test
+```{r,eval=FALSE}
+
+#partition into training, and cross validation dataset
+set.seed(1)
+trainIndex <- createDataPartition(train3$classe, p = .8, list = FALSE, times = 1)
+train4<-train3[ trainIndex,]
+crossval<-train3[-trainIndex,]
+
+#get correlation between features. order by biggest to smallest.
+cor1<-cor(select(train4,-classe),unclass(train4$classe))
+variables <- rownames(cor1)
+corr <- cor1[,1]
+corrsort<- data.frame(variables=variables,corr=corr) %>%
+  mutate(abscorr = abs(corr)) %>%
+  top_n(10,abscorr)
+
+```
+
+Once the top 10 features were chosen, I tried testing on the following methodologies:
+fit1. glmnet (regularised regression)
+fit2. gbm (gradient boosting model)
+combination of 1. and 2.
+fit3. rf (random forest)
+
+
+```{r,eval=FALSE}
+
+fit1<-train(classe~magnet_belt_y+magnet_belt_z+pitch_arm+accel_arm_x+magnet_arm_x+magnet_arm_y+
+             pitch_forearm+total_accel_forearm+accel_forearm_x+magnet_forearm_x,method="glmnet",data=train4)
+fit2<-train(classe~magnet_belt_y+magnet_belt_z+pitch_arm+accel_arm_x+magnet_arm_x+magnet_arm_y+
+              pitch_forearm+total_accel_forearm+accel_forearm_x+magnet_forearm_x,method="gbm",data=train4)
+fit3<-train(classe~magnet_belt_y+magnet_belt_z+pitch_arm+accel_arm_x+magnet_arm_x+magnet_arm_y+
+              pitch_forearm+total_accel_forearm+accel_forearm_x+magnet_forearm_x,method="rf",data=train4)
+p1<-predict(fit1,newdata=train4)
+p2<-predict(fit2,newdata=train4)
+p3<-predict(fit3,newdata=train4)
+cv1<-predict(fit1,newdata=crossval)
+cv2<-predict(fit2,newdata=crossval)
+cv3<-predict(fit3,newdata=crossval)
+comb<- data.frame(p1,p2,classe=train4$classe)
+fitcomb<-train(classe~.,method="rf",data=comb)
+
+combcv<- predict(fitcomb,newdata=crossval)
+
+confusionMatrix(fit1)
+confusionMatrix(fit2)
+confusionMatrix(fit3)
+confusionMatrix(train4$classe,p1)
+confusionMatrix(train4$classe,p2)
+confusionMatrix(train4$classe,p3)
+confusionMatrix(fitcomb)
+t1<-predict(fit1,newdata=test)
+t2<-predict(fit2,newdata=test)
+combtest<- data.frame(p1=t1,p2=t2)
+t3<-predict(fit3,newdata=test)
+
+```
+
+the confusion matrix showed the best outcomes from the random forest model. For example, the cross validation error:
+
+```{r,eval=FALSE}
+>confusionMatrix(train4$classe,p3)
+ 
+Confusion Matrix and Statistics
+
+          Reference
+Prediction    A    B    C    D    E
+         A 4464    0    0    0    0
+         B    0 3038    0    0    0
+         C    0    0 2738    0    0
+         D    0    0    0 2573    0
+         E    0    0    0    0 2886
+
+```
+
+
+This was then applied to the test data to come up with the following results:
+
+```{r,eval=FALSE}
+Answers based on fit3 - random forest
+1 B
+2 A
+3 B
+4 A
+5 A
+6 E
+7 D
+8 B
+9 A
+10 A
+11 B
+12 C
+13 B
+14 A
+15 E
+16 E
+17 A
+18 B
+19 B
+20 B
+
+```
+
+
+
+##Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
